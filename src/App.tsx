@@ -76,7 +76,6 @@ export default function App() {
   const [isMuted, setIsMuted] = useState<boolean>(() => soundManager.getMuted());
   const [selectedWallSlot, setSelectedWallSlot] = useState<{ x: number; y: number; d: Direction } | null>(null);
   const [lastAction, setLastAction] = useState<Action | null>(null);
-  const [autoFlipPassAndPlay, setAutoFlipPassAndPlay] = useState<boolean>(true);
   const [isAiThinking, setIsAiThinking] = useState<boolean>(false);
   const [copiedRoomCode, setCopiedRoomCode] = useState<boolean>(false);
 
@@ -128,20 +127,6 @@ export default function App() {
     };
   }, [gameMode, currentRoomId]);
 
-  // Auto-rotate board in pass-and-play mode
-  const syncPassAndPlayRotation = useCallback(
-    (nextWaitFor: number, count: number) => {
-      if (gameMode === 'pass_and_play' && autoFlipPassAndPlay) {
-        if (count === 2) {
-          setBoardRotation(nextWaitFor === 0 ? 0 : 180);
-        } else {
-          setBoardRotation((nextWaitFor * 90) % 360);
-        }
-      }
-    },
-    [gameMode, autoFlipPassAndPlay]
-  );
-
   // Handle victory confetti
   const prevWinnerCount = useRef(0);
   useEffect(() => {
@@ -178,7 +163,6 @@ export default function App() {
     setGameMode('pass_and_play');
     setCurrentRoomId(null);
     setMyPlayerIndex(0);
-    setAutoFlipPassAndPlay(true);
     setState(createInitialState(count));
     setActionMode('move');
     setSelectedWallSlot(null);
@@ -316,10 +300,9 @@ export default function App() {
         setState(nextState);
         setLastAction(action);
         setSelectedWallSlot(null);
-        syncPassAndPlayRotation(nextState.waitFor, nextState.playerCount);
       }
     },
-    [state, isAiThinking, gameMode, myPlayerIndex, currentRoomId, syncPassAndPlayRotation]
+    [state, isAiThinking, gameMode, myPlayerIndex, currentRoomId]
   );
 
   // Handle Place Wall
@@ -361,10 +344,9 @@ export default function App() {
         if (nextState.leftWalls[nextState.waitFor] <= 0) {
           setActionMode('move');
         }
-        syncPassAndPlayRotation(nextState.waitFor, nextState.playerCount);
       }
     },
-    [state, isAiThinking, gameMode, myPlayerIndex, currentRoomId, syncPassAndPlayRotation]
+    [state, isAiThinking, gameMode, myPlayerIndex, currentRoomId]
   );
 
   // Confirm selected wall slot from mobile confirmation bar

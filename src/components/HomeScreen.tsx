@@ -133,7 +133,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             onClick={() => onStartPassAndPlay(2)}
             className="w-full py-3 px-4 rounded-full bg-white hover:bg-stone-50 active:scale-[0.99] text-stone-800 border border-stone-200/90 shadow-xs font-medium text-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
           >
-            <span className="text-emerald-500">🔄</span>
+            <span className="text-emerald-500">👥</span>
             <span>面对面对战</span>
           </button>
 

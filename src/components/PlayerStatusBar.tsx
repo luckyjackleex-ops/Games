@@ -54,7 +54,7 @@ export const PlayerStatusBar: React.FC<PlayerStatusBarProps> = ({
     }
 
     if (gameMode === 'pass_and_play') {
-      return `轮到 ${configs[activePlayer]?.name} 操作（面对面桌游）`;
+      return `轮到 ${configs[activePlayer]?.name} 操作`;
     }
 
     return `等玩家${activePlayer + 1}操作`;
@@ -67,8 +67,8 @@ export const PlayerStatusBar: React.FC<PlayerStatusBarProps> = ({
         {Array.from({ length: state.playerCount }).map((_, idx) => {
           const cfg = configs[idx];
           const isTurn = state.waitFor === idx && !state.isOver;
-          const isMe = gameMode === 'online' ? myPlayerIndex === idx : idx === 0;
-          const isCurrentHost = idx === 0;
+          const isMe = gameMode === 'online' ? myPlayerIndex === idx : (gameMode === 'pass_and_play' ? false : idx === 0);
+          const isCurrentHost = gameMode === 'online' && idx === 0;
           const wallsLeft = state.leftWalls[idx] ?? 0;
           const avatarEmoji = DEFAULT_AVATARS[idx] || '👤';
 
@@ -78,7 +78,12 @@ export const PlayerStatusBar: React.FC<PlayerStatusBarProps> = ({
               <div className="relative">
                 {/* Badges on Top-Left */}
                 <div className="absolute -top-1.5 -left-1.5 z-10 flex flex-col gap-0.5 items-start">
-                  {isCurrentHost && gameMode !== 'ai' && (
+                  {gameMode === 'pass_and_play' && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-stone-700 text-white text-[9px] font-bold leading-tight shadow-2xs">
+                      P{idx + 1}
+                    </span>
+                  )}
+                  {isCurrentHost && (
                     <span className="px-1.5 py-0.2 rounded-full bg-[#f97316] text-white text-[9px] font-bold leading-tight shadow-2xs">
                       房主
                     </span>
