@@ -1,0 +1,9 @@
+{
+  "pages": [
+    "pages/index/index"
+  ],
+  "window": {
+    "defaultTitle": "步步为营",
+    "navigationStyle": "custom"
+  }
+}

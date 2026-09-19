@@ -1,0 +1,11 @@
+{
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "postcss": true,
+    "minified": true
+  },
+  "appid": "tt0000000000000000",
+  "projectname": "quoridor-game",
+  "miniprogramRoot": "./"
+}
