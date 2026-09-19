@@ -1,0 +1,6 @@
+{
+  "name": "路墙棋 (步步为营 Quoridor)",
+  "description": "路墙棋（步步为营 Quoridor）完整游戏实现、产品需求文档 (PRD) 与技术架构方案",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
