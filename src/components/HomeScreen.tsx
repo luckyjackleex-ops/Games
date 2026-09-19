@@ -22,7 +22,7 @@ interface HomeScreenProps {
   onStartPassAndPlay: (playerCount: 2 | 3 | 4) => void;
   onStartLocalGame: (playerCount: 2 | 3 | 4) => void;
   onCreateRoom: (playerCount: 2 | 3 | 4) => void;
-  onJoinRoom: (roomId: string) => void;
+  onJoinRoom: (roomId: string) => Promise<{ success: boolean; error?: string } | void> | void;
   onOpenRules: () => void;
   onOpenPuzzles: () => void;
   recentRooms: RecentRoomItem[];
@@ -44,6 +44,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 }) => {
   const [inputRoomId, setInputRoomId] = useState('');
   const [inputError, setInputError] = useState('');
+  const [isJoining, setIsJoining] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
   const [showLocalModal, setShowLocalModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -52,14 +53,24 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [selectedPlayerCount, setSelectedPlayerCount] = useState<2 | 3 | 4>(2);
   const [selectedDifficulty, setSelectedDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
 
-  const handleJoinClick = () => {
-    const trimmed = inputRoomId.trim();
-    if (!trimmed) {
+  const handleJoinClick = async (targetCode?: string) => {
+    const code = (targetCode || inputRoomId).trim();
+    if (!code) {
       setInputError('请输入4位房间号');
       return;
     }
     setInputError('');
-    onJoinRoom(trimmed);
+    setIsJoining(true);
+    try {
+      const res = await onJoinRoom(code);
+      if (res && !res.success && res.error) {
+        setInputError(res.error);
+      }
+    } catch {
+      setInputError('进入房间异常，请重试');
+    } finally {
+      setIsJoining(false);
+    }
   };
 
   return (
@@ -194,11 +205,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           {/* 8. 进入房间 button */}
           <button
             id="btn-home-join-room"
-            onClick={handleJoinClick}
-            className="w-full py-2.5 px-4 rounded-full bg-[#dbe4ee] hover:bg-[#ccd8e5] active:scale-[0.99] text-slate-700 font-medium text-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
+            onClick={() => handleJoinClick()}
+            disabled={isJoining}
+            className={`w-full py-2.5 px-4 rounded-full font-medium text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
+              isJoining
+                ? 'bg-[#ccd8e5] text-slate-500 cursor-wait'
+                : 'bg-[#dbe4ee] hover:bg-[#ccd8e5] active:scale-[0.99] text-slate-700'
+            }`}
           >
             <Users className="w-4 h-4 text-slate-600" />
-            <span>进入房间</span>
+            <span>{isJoining ? '正在连接房间...' : '进入房间'}</span>
           </button>
         </div>
 
@@ -230,8 +246,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       {formatRelativeTime(room.visitedAt)}
                     </span>
                     <button
-                      onClick={() => onJoinRoom(room.id)}
-                      className="px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-blue-50 hover:text-blue-600 text-stone-700 font-medium text-xs border border-stone-200 transition-colors"
+                      onClick={() => handleJoinClick(room.id)}
+                      disabled={isJoining}
+                      className="px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-blue-50 hover:text-blue-600 text-stone-700 font-medium text-xs border border-stone-200 transition-colors cursor-pointer"
                     >
                       进入
                     </button>

@@ -104,23 +104,33 @@ export default function App() {
     if (gameMode !== 'online' || !currentRoomId) return;
 
     // Load initial room data
-    const initial = getOnlineRoom(currentRoomId);
-    if (initial) {
-      setCurrentRoom(initial);
-      setState(initial.state);
-    }
-
-    const unsubscribe = subscribeToRoom(currentRoomId, (updatedRoom) => {
-      setCurrentRoom((prev) => {
-        if (prev && prev.status === 'waiting' && updatedRoom.status === 'playing') {
-          soundManager.playGameStart();
-        } else if (prev && prev.players.length < updatedRoom.players.length) {
-          soundManager.playJoinRoom();
-        }
-        return updatedRoom;
-      });
-      setState(updatedRoom.state);
+    getOnlineRoom(currentRoomId).then((initial) => {
+      if (initial) {
+        setCurrentRoom(initial);
+        setState(initial.state);
+      }
     });
+
+    const unsubscribe = subscribeToRoom(
+      currentRoomId,
+      (updatedRoom) => {
+        setCurrentRoom((prev) => {
+          if (prev && prev.status === 'waiting' && updatedRoom.status === 'playing') {
+            soundManager.playGameStart();
+          } else if (prev && prev.players.length < updatedRoom.players.length) {
+            soundManager.playJoinRoom();
+          }
+          return updatedRoom;
+        });
+        setState(updatedRoom.state);
+      },
+      () => {
+        // Room was disbanded by host
+        setCurrentRoomId(null);
+        setCurrentRoom(null);
+        setCurrentScreen('home');
+      }
+    );
 
     return () => {
       unsubscribe();
@@ -184,50 +194,15 @@ export default function App() {
     setCurrentScreen('game');
   };
 
-  const handleCreateRoom = (count: 2 | 3 | 4) => {
-    const room = createOnlineRoom(count, '小猫 (房主)', '🐱');
-    setPlayerCount(count);
-    setGameMode('online');
-    setCurrentRoomId(room.id);
-    setCurrentRoom(room);
-    setMyPlayerIndex(0);
-    setState(room.state);
-    setActionMode('move');
-    setSelectedWallSlot(null);
-    setLastAction(null);
-    setBoardRotation(0);
-    refreshRecentRooms();
-    soundManager.playJoinRoom();
-    setCurrentScreen('game');
-  };
-
-  const handleJoinRoom = (roomId: string) => {
-    const normId = roomId.trim().toLowerCase();
-    const joinResult = joinOnlineRoom(normId);
-    if (joinResult.room) {
-      setPlayerCount(joinResult.room.playerCount);
+  const handleCreateRoom = async (count: 2 | 3 | 4) => {
+    try {
+      const room = await createOnlineRoom(count, '小猫 (房主)', '🐱');
+      setPlayerCount(count);
       setGameMode('online');
-      setCurrentRoomId(joinResult.room.id);
-      setCurrentRoom(joinResult.room);
-      setMyPlayerIndex(joinResult.playerIndex >= 0 ? joinResult.playerIndex : 0);
-      setState(joinResult.room.state);
-      setActionMode('move');
-      setSelectedWallSlot(null);
-      setLastAction(null);
-      setBoardRotation(0);
-      refreshRecentRooms();
-      soundManager.playJoinRoom();
-      setCurrentScreen('game');
-    } else {
-      // Room didn't exist yet, auto-create it with this code
-      const newRoom = createOnlineRoom(2, '小猫 (房主)', '🐱');
-      newRoom.id = normId;
-      setPlayerCount(2);
-      setGameMode('online');
-      setCurrentRoomId(normId);
-      setCurrentRoom(newRoom);
+      setCurrentRoomId(room.id);
+      setCurrentRoom(room);
       setMyPlayerIndex(0);
-      setState(newRoom.state);
+      setState(room.state);
       setActionMode('move');
       setSelectedWallSlot(null);
       setLastAction(null);
@@ -235,12 +210,44 @@ export default function App() {
       refreshRecentRooms();
       soundManager.playJoinRoom();
       setCurrentScreen('game');
+    } catch (err) {
+      console.error('Failed to create room', err);
     }
   };
 
-  const handleStartOnlineGame = (fillWithAi: boolean) => {
+  const handleJoinRoom = async (roomId: string): Promise<{ success: boolean; error?: string }> => {
+    const normId = roomId.trim().toLowerCase();
+    try {
+      const joinResult = await joinOnlineRoom(normId);
+      if (joinResult.room) {
+        setPlayerCount(joinResult.room.playerCount);
+        setGameMode('online');
+        setCurrentRoomId(joinResult.room.id);
+        setCurrentRoom(joinResult.room);
+        setMyPlayerIndex(joinResult.playerIndex >= 0 ? joinResult.playerIndex : 0);
+        setState(joinResult.room.state);
+        setActionMode('move');
+        setSelectedWallSlot(null);
+        setLastAction(null);
+        setBoardRotation(0);
+        refreshRecentRooms();
+        soundManager.playJoinRoom();
+        setCurrentScreen('game');
+        return { success: true };
+      } else {
+        return {
+          success: false,
+          error: joinResult.error || '未找到该房间，请核对房间号',
+        };
+      }
+    } catch {
+      return { success: false, error: '网络连接异常，请重试' };
+    }
+  };
+
+  const handleStartOnlineGame = async (fillWithAi: boolean) => {
     if (!currentRoomId) return;
-    const room = startOnlineRoom(currentRoomId, fillWithAi);
+    const room = await startOnlineRoom(currentRoomId, fillWithAi);
     if (room) {
       setCurrentRoom(room);
       setState(room.state);
@@ -248,9 +255,9 @@ export default function App() {
     }
   };
 
-  const handleLeaveOnlineRoom = () => {
+  const handleLeaveOnlineRoom = async () => {
     if (currentRoomId) {
-      leaveOnlineRoom(currentRoomId);
+      await leaveOnlineRoom(currentRoomId);
     }
     setCurrentRoomId(null);
     setCurrentRoom(null);
@@ -261,8 +268,10 @@ export default function App() {
   // Handle Reset / New Game
   const handleResetGame = () => {
     if (gameMode === 'online' && currentRoomId) {
-      const resetRoom = resetOnlineRoom(currentRoomId);
-      if (resetRoom) setState(resetRoom.state);
+      resetOnlineRoom(currentRoomId).then((resetRoom) => {
+        if (resetRoom) setState(resetRoom.state);
+      });
+      setState(createInitialState(playerCount));
     } else {
       setState(createInitialState(playerCount));
     }
@@ -287,13 +296,12 @@ export default function App() {
       const action: Action = { type: 'MOVE', x: targetPos.x, y: targetPos.y };
 
       if (gameMode === 'online' && currentRoomId) {
-        const updated = applyOnlineRoomAction(currentRoomId, action);
-        if (updated) {
-          soundManager.playMove();
-          setState(updated.state);
-          setLastAction(action);
-          setSelectedWallSlot(null);
-        }
+        soundManager.playMove();
+        const nextState = applyAction(state, action);
+        setState(nextState);
+        setLastAction(action);
+        setSelectedWallSlot(null);
+        applyOnlineRoomAction(currentRoomId, action);
       } else {
         const nextState = applyAction(state, action);
         soundManager.playMove();
@@ -325,16 +333,15 @@ export default function App() {
       const action: Action = { type: 'WALL', x: wall.x, y: wall.y, d: wall.d };
 
       if (gameMode === 'online' && currentRoomId) {
-        const updated = applyOnlineRoomAction(currentRoomId, action);
-        if (updated) {
-          soundManager.playWall();
-          setState(updated.state);
-          setLastAction(action);
-          setSelectedWallSlot(null);
-          if (updated.state.leftWalls[updated.state.waitFor] <= 0) {
-            setActionMode('move');
-          }
+        soundManager.playWall();
+        const nextState = applyAction(state, action);
+        setState(nextState);
+        setLastAction(action);
+        setSelectedWallSlot(null);
+        if (nextState.leftWalls[nextState.waitFor] <= 0) {
+          setActionMode('move');
         }
+        applyOnlineRoomAction(currentRoomId, action);
       } else {
         const nextState = applyAction(state, action);
         soundManager.playWall();

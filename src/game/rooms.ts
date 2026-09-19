@@ -1,5 +1,5 @@
 import { GameState, Action } from '../types';
-import { createInitialState, applyAction } from './rules';
+import { createInitialState } from './rules';
 
 export interface RoomPlayer {
   id: string;
@@ -27,80 +27,61 @@ export interface RecentRoomItem {
   visitedAt: number;
 }
 
-const STORAGE_ROOMS_KEY = 'quoridor_rooms_v1';
-const STORAGE_RECENT_KEY = 'quoridor_recent_rooms_v1';
-const STORAGE_PLAYER_ID = 'quoridor_my_player_id';
+const STORAGE_RECENT_KEY = 'quoridor_recent_rooms_v2';
+const STORAGE_PLAYER_ID = 'quoridor_tab_player_id_v2';
 
-// Stable unique ID for this browser tab/session
+// Stable unique ID per browser tab (using sessionStorage so multiple tabs get different players)
 export function getMyPlayerId(): string {
-  let id = localStorage.getItem(STORAGE_PLAYER_ID);
-  if (!id) {
-    id = 'user_' + Math.random().toString(36).substring(2, 9);
-    localStorage.setItem(STORAGE_PLAYER_ID, id);
-  }
-  return id;
-}
-
-// Generate friendly 4-character room code like "7ofz", "tr77"
-export function generateRoomId(): string {
-  const chars = '23456789abcdefghjkmnpqrstuvwxyz';
-  let result = '';
-  for (let i = 0; i < 4; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-}
-
-// Load all saved rooms from localStorage
-function getAllRooms(): Record<string, OnlineRoom> {
   try {
-    const raw = localStorage.getItem(STORAGE_ROOMS_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-// Save rooms map
-function saveAllRooms(rooms: Record<string, OnlineRoom>) {
-  try {
-    localStorage.setItem(STORAGE_ROOMS_KEY, JSON.stringify(rooms));
-  } catch (err) {
-    console.warn('Failed to save rooms to storage', err);
-  }
-}
-
-// Broadcast an event across tabs
-function broadcastRoomUpdate(roomId: string, room: OnlineRoom) {
-  try {
-    if (typeof BroadcastChannel !== 'undefined') {
-      const channel = new BroadcastChannel(`quoridor_room_${roomId}`);
-      channel.postMessage({ type: 'ROOM_UPDATE', room });
-      channel.close();
+    let id = sessionStorage.getItem(STORAGE_PLAYER_ID);
+    if (!id) {
+      id = 'user_' + Math.random().toString(36).substring(2, 9);
+      sessionStorage.setItem(STORAGE_PLAYER_ID, id);
     }
+    return id;
   } catch {
-    // fallback to storage event
+    return 'user_' + Math.random().toString(36).substring(2, 9);
   }
 }
 
-// Create a new room
-export function createOnlineRoom(
+// 1. Create a new room on the server
+export async function createOnlineRoom(
   playerCount: 2 | 3 | 4 = 2,
   hostName = '小猫 (房主)',
   hostAvatar = '🐱'
-): OnlineRoom {
-  const id = generateRoomId();
-  const hostId = getMyPlayerId();
-  const initialState = createInitialState(playerCount);
+): Promise<OnlineRoom> {
+  const playerId = getMyPlayerId();
 
-  const newRoom: OnlineRoom = {
-    id,
+  try {
+    const res = await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        playerCount,
+        hostName,
+        hostAvatar,
+        playerId,
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      addRecentRoom(data.room.id, hostName, playerCount);
+      return data.room;
+    }
+  } catch (err) {
+    console.warn('Server createRoom failed, fallback to local', err);
+  }
+
+  // Fallback to local offline state if server is not reachable
+  const fallbackRoom: OnlineRoom = {
+    id: 'local_' + Math.random().toString(36).substring(2, 6),
     createdAt: Date.now(),
-    hostId,
+    hostId: playerId,
     playerCount,
     players: [
       {
-        id: hostId,
+        id: playerId,
         name: hostName,
         avatar: hostAvatar,
         playerIndex: 0,
@@ -108,236 +89,217 @@ export function createOnlineRoom(
         connected: true,
       },
     ],
-    state: initialState,
-    status: 'waiting', // Wait in lobby for friends to enter room ID
+    state: createInitialState(playerCount),
+    status: 'waiting',
   };
-
-  const rooms = getAllRooms();
-  rooms[id] = newRoom;
-  saveAllRooms(rooms);
-  addRecentRoom(id, hostName, playerCount);
-  broadcastRoomUpdate(id, newRoom);
-
-  return newRoom;
+  addRecentRoom(fallbackRoom.id, hostName, playerCount);
+  return fallbackRoom;
 }
 
-// Get room by ID
-export function getOnlineRoom(roomId: string): OnlineRoom | null {
+// 2. Fetch room details from server
+export async function getOnlineRoom(roomId: string): Promise<OnlineRoom | null> {
   const normId = roomId.trim().toLowerCase();
-  const rooms = getAllRooms();
-  if (rooms[normId]) {
-    return rooms[normId];
+  try {
+    const res = await fetch(`/api/rooms/${encodeURIComponent(normId)}`);
+    if (res.ok) {
+      const data = await res.json();
+      return data.room;
+    }
+  } catch (err) {
+    console.warn('Failed to fetch room from server', err);
   }
-
-  // If user searched for default sample room "tr77", bootstrap it
-  if (normId === 'tr77') {
-    const sampleRoom: OnlineRoom = {
-      id: 'tr77',
-      createdAt: Date.now() - 60000,
-      hostId: 'sample_host',
-      playerCount: 4,
-      players: [
-        { id: 'sample_host', name: '小猫 (房主)', avatar: '🐱', playerIndex: 0, isHost: true, connected: true },
-        { id: 'p2', name: '小狗', avatar: '🐶', playerIndex: 1, isHost: false, connected: true },
-        { id: 'p3', name: '小马', avatar: '🐴', playerIndex: 2, isHost: false, connected: true },
-        { id: 'p4', name: '小牛', avatar: '🐮', playerIndex: 3, isHost: false, connected: true },
-      ],
-      state: createInitialState(4),
-      status: 'playing',
-    };
-    rooms['tr77'] = sampleRoom;
-    saveAllRooms(rooms);
-    return sampleRoom;
-  }
-
   return null;
 }
 
-const DEFAULT_SLOT_AVATARS = ['🐱', '🐶', '🐴', '🐮'];
-const DEFAULT_SLOT_NAMES = ['小猫', '小狗', '小马', '小牛'];
-
-// Join an existing room
-export function joinOnlineRoom(
+// 3. Join an existing room
+export async function joinOnlineRoom(
   roomId: string,
   playerName?: string,
   playerAvatar?: string
-): { room: OnlineRoom | null; error?: string; playerIndex: number } {
+): Promise<{ room: OnlineRoom | null; error?: string; playerIndex: number }> {
   const normId = roomId.trim().toLowerCase();
-  const room = getOnlineRoom(normId);
+  const playerId = getMyPlayerId();
 
-  if (!room) {
-    return { room: null, error: '房间不存在或已解散', playerIndex: -1 };
+  try {
+    const res = await fetch(`/api/rooms/${encodeURIComponent(normId)}/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        playerId,
+        playerName,
+        playerAvatar,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      return { room: null, error: data.error || '无法加入房间', playerIndex: -1 };
+    }
+
+    addRecentRoom(data.room.id, data.room.players[0]?.name || '房主', data.room.playerCount);
+    return { room: data.room, playerIndex: data.playerIndex };
+  } catch (err) {
+    console.error('joinOnlineRoom network error:', err);
+    return { room: null, error: '网络连接异常，请重试', playerIndex: -1 };
   }
+}
 
-  const myId = getMyPlayerId();
-  const existingPlayer = room.players.find((p) => p.id === myId);
+// 4. Host starts the game from waiting lobby
+export async function startOnlineRoom(roomId: string, fillWithAi = false): Promise<OnlineRoom | null> {
+  const normId = roomId.trim().toLowerCase();
+  const playerId = getMyPlayerId();
 
-  if (existingPlayer) {
-    addRecentRoom(room.id, room.players[0]?.name || '小猫 (房主)', room.playerCount);
-    return { room, playerIndex: existingPlayer.playerIndex };
+  try {
+    const res = await fetch(`/api/rooms/${encodeURIComponent(normId)}/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fillWithAi, playerId }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      return data.room;
+    }
+  } catch (err) {
+    console.warn('startOnlineRoom failed', err);
   }
+  return null;
+}
 
-  // Assign next available player slot
-  if (room.players.length >= room.playerCount) {
-    // As spectator or fallback
-    addRecentRoom(room.id, room.players[0]?.name || '小猫 (房主)', room.playerCount);
-    return { room, playerIndex: 0 };
+// 5. Player leaves room
+export async function leaveOnlineRoom(roomId: string): Promise<{ disbanded: boolean }> {
+  const normId = roomId.trim().toLowerCase();
+  const playerId = getMyPlayerId();
+
+  try {
+    const res = await fetch(`/api/rooms/${encodeURIComponent(normId)}/leave`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerId }),
+    });
+
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.warn('leaveOnlineRoom failed', err);
   }
+  return { disbanded: true };
+}
 
-  const nextIdx = room.players.length;
-  const newPlayer: RoomPlayer = {
-    id: myId,
-    name: playerName || DEFAULT_SLOT_NAMES[nextIdx] || `玩家${nextIdx + 1}`,
-    avatar: playerAvatar || DEFAULT_SLOT_AVATARS[nextIdx] || '🐶',
-    playerIndex: nextIdx,
-    isHost: false,
-    connected: true,
+// 6. Apply an action to the room state
+export async function applyOnlineRoomAction(roomId: string, action: Action): Promise<OnlineRoom | null> {
+  const normId = roomId.trim().toLowerCase();
+  const playerId = getMyPlayerId();
+
+  try {
+    const res = await fetch(`/api/rooms/${encodeURIComponent(normId)}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, playerId }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      return data.room;
+    }
+  } catch (err) {
+    console.warn('applyOnlineRoomAction failed', err);
+  }
+  return null;
+}
+
+// 7. Reset room game
+export async function resetOnlineRoom(roomId: string): Promise<OnlineRoom | null> {
+  const normId = roomId.trim().toLowerCase();
+  const playerId = getMyPlayerId();
+
+  try {
+    const res = await fetch(`/api/rooms/${encodeURIComponent(normId)}/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerId }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      return data.room;
+    }
+  } catch (err) {
+    console.warn('resetOnlineRoom failed', err);
+  }
+  return null;
+}
+
+// 8. Subscribe to room updates (SSE with polling backup)
+export function subscribeToRoom(
+  roomId: string,
+  onUpdate: (room: OnlineRoom) => void,
+  onDisbanded?: () => void
+): () => void {
+  const normId = roomId.trim().toLowerCase();
+  let eventSource: EventSource | null = null;
+  let pollingTimer: number | null = null;
+  let isClosed = false;
+
+  // Function to poll the server for room updates
+  const pollServer = async () => {
+    if (isClosed) return;
+    try {
+      const room = await getOnlineRoom(normId);
+      if (room && !isClosed) {
+        onUpdate(room);
+      } else if (!room && !isClosed) {
+        onDisbanded?.();
+      }
+    } catch {
+      // ignore transient poll error
+    }
   };
 
-  room.players.push(newPlayer);
-  const rooms = getAllRooms();
-  rooms[normId] = room;
-  saveAllRooms(rooms);
-  addRecentRoom(room.id, room.players[0]?.name || '小猫 (房主)', room.playerCount);
-  broadcastRoomUpdate(room.id, room);
-
-  return { room, playerIndex: nextIdx };
-}
-
-// Host starts the game from waiting lobby
-export function startOnlineRoom(roomId: string, fillWithAi = false): OnlineRoom | null {
-  const normId = roomId.trim().toLowerCase();
-  const rooms = getAllRooms();
-  const room = rooms[normId];
-  if (!room) return null;
-
-  if (fillWithAi) {
-    while (room.players.length < room.playerCount) {
-      const idx = room.players.length;
-      room.players.push({
-        id: `ai_${idx}_${Math.random().toString(36).substring(2, 7)}`,
-        name: `${DEFAULT_SLOT_NAMES[idx] || '玩家'} (AI)`,
-        avatar: DEFAULT_SLOT_AVATARS[idx] || '🤖',
-        playerIndex: idx,
-        isHost: false,
-        connected: true,
-      });
-    }
-  }
-
-  room.status = 'playing';
-  room.state = createInitialState(room.playerCount);
-  rooms[normId] = room;
-  saveAllRooms(rooms);
-  broadcastRoomUpdate(room.id, room);
-
-  return room;
-}
-
-// Player leaves room
-export function leaveOnlineRoom(roomId: string): { disbanded: boolean } {
-  const normId = roomId.trim().toLowerCase();
-  const rooms = getAllRooms();
-  const room = rooms[normId];
-  if (!room) return { disbanded: true };
-
-  const myId = getMyPlayerId();
-  if (room.hostId === myId) {
-    delete rooms[normId];
-    saveAllRooms(rooms);
-    broadcastRoomUpdate(normId, { ...room, status: 'finished', players: [] });
-    return { disbanded: true };
-  } else {
-    room.players = room.players.filter((p) => p.id !== myId);
-    room.players.forEach((p, idx) => {
-      p.playerIndex = idx;
-    });
-    rooms[normId] = room;
-    saveAllRooms(rooms);
-    broadcastRoomUpdate(room.id, room);
-    return { disbanded: false };
-  }
-}
-
-// Apply an action to the room state
-export function applyOnlineRoomAction(roomId: string, action: Action): OnlineRoom | null {
-  const normId = roomId.trim().toLowerCase();
-  const room = getOnlineRoom(normId);
-  if (!room) return null;
-
-  const nextState = applyAction(room.state, action);
-  room.state = nextState;
-  if (nextState.isOver) {
-    room.status = 'finished';
-  }
-
-  const rooms = getAllRooms();
-  rooms[normId] = room;
-  saveAllRooms(rooms);
-  broadcastRoomUpdate(room.id, room);
-
-  return room;
-}
-
-// Reset room game
-export function resetOnlineRoom(roomId: string): OnlineRoom | null {
-  const normId = roomId.trim().toLowerCase();
-  const room = getOnlineRoom(normId);
-  if (!room) return null;
-
-  room.state = createInitialState(room.playerCount);
-  room.status = 'playing';
-
-  const rooms = getAllRooms();
-  rooms[normId] = room;
-  saveAllRooms(rooms);
-  broadcastRoomUpdate(room.id, room);
-
-  return room;
-}
-
-// Subscribe to room updates (for multi-tab / real-time sync)
-export function subscribeToRoom(roomId: string, onUpdate: (room: OnlineRoom) => void): () => void {
-  const normId = roomId.trim().toLowerCase();
-
-  let channel: BroadcastChannel | null = null;
-  try {
-    if (typeof BroadcastChannel !== 'undefined') {
-      channel = new BroadcastChannel(`quoridor_room_${normId}`);
-      channel.onmessage = (event) => {
-        if (event.data?.type === 'ROOM_UPDATE' && event.data.room?.id === normId) {
-          onUpdate(event.data.room);
+  // Setup Server-Sent Events (SSE)
+  if (typeof EventSource !== 'undefined') {
+    try {
+      eventSource = new EventSource(`/api/rooms/${encodeURIComponent(normId)}/events`);
+      eventSource.onmessage = (event) => {
+        if (isClosed) return;
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'ROOM_UPDATE' && data.room) {
+            onUpdate(data.room);
+          } else if (data.type === 'ROOM_DISBANDED') {
+            onDisbanded?.();
+          }
+        } catch {
+          // ignore parse error
         }
       };
+      eventSource.onerror = () => {
+        // SSE temporary reconnecting or error; polling will cover updates
+      };
+    } catch (e) {
+      console.warn('EventSource initialization failed, using polling fallback', e);
     }
-  } catch {
-    // fallback to storage event
   }
 
-  const storageHandler = (e: StorageEvent) => {
-    if (e.key === STORAGE_ROOMS_KEY && e.newValue) {
-      try {
-        const rooms = JSON.parse(e.newValue);
-        if (rooms[normId]) {
-          onUpdate(rooms[normId]);
-        }
-      } catch {
-        // ignore parse error
-      }
-    }
-  };
+  // Backup polling every 1200ms
+  pollingTimer = window.setInterval(pollServer, 1200);
 
-  window.addEventListener('storage', storageHandler);
-
+  // Return unsubscribe callback
   return () => {
-    if (channel) {
-      channel.close();
+    isClosed = true;
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
     }
-    window.removeEventListener('storage', storageHandler);
+    if (pollingTimer) {
+      clearInterval(pollingTimer);
+      pollingTimer = null;
+    }
   };
 }
 
-// Recent Rooms management
+// 9. Recent Rooms management
 export function getRecentRooms(): RecentRoomItem[] {
   try {
     const raw = localStorage.getItem(STORAGE_RECENT_KEY);
@@ -347,16 +309,7 @@ export function getRecentRooms(): RecentRoomItem[] {
   } catch {
     // ignore
   }
-
-  // Default initial sample matching screenshot
-  return [
-    {
-      id: 'tr77',
-      hostName: '房主',
-      playerCount: 4,
-      visitedAt: Date.now() - 30000,
-    },
-  ];
+  return [];
 }
 
 export function addRecentRoom(id: string, hostName: string, playerCount: 2 | 3 | 4) {
@@ -368,14 +321,12 @@ export function addRecentRoom(id: string, hostName: string, playerCount: 2 | 3 |
       playerCount,
       visitedAt: Date.now(),
     });
-    // Keep at most 6 recent rooms
     localStorage.setItem(STORAGE_RECENT_KEY, JSON.stringify(recents.slice(0, 6)));
   } catch {
     // ignore
   }
 }
 
-// Format relative time (刚刚, X分钟前, 昨天等)
 export function formatRelativeTime(timestamp: number): string {
   const diff = Date.now() - timestamp;
   const minutes = Math.floor(diff / 60000);
