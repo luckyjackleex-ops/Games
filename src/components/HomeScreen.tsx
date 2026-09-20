@@ -20,7 +20,6 @@ import {
 interface HomeScreenProps {
   onStartAiGame: (playerCount: 2 | 3 | 4, difficulty: 'easy' | 'medium' | 'hard') => void;
   onStartPassAndPlay: (playerCount: 2 | 3 | 4) => void;
-  onStartLocalGame: (playerCount: 2 | 3 | 4) => void;
   onCreateRoom: (playerCount: 2 | 3 | 4) => void;
   onJoinRoom: (roomId: string) => Promise<{ success: boolean; error?: string } | void> | void;
   onOpenRules: () => void;
@@ -33,7 +32,6 @@ interface HomeScreenProps {
 export const HomeScreen: React.FC<HomeScreenProps> = ({
   onStartAiGame,
   onStartPassAndPlay,
-  onStartLocalGame,
   onCreateRoom,
   onJoinRoom,
   onOpenRules,
@@ -46,7 +44,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [inputError, setInputError] = useState('');
   const [isJoining, setIsJoining] = useState(false);
   const [showAiModal, setShowAiModal] = useState(false);
-  const [showLocalModal, setShowLocalModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
   // Selected configs for quick modals
@@ -148,17 +145,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             <span>面对面对战</span>
           </button>
 
-          {/* 4. 本地对战 */}
-          <button
-            id="btn-home-local"
-            onClick={() => setShowLocalModal(true)}
-            className="w-full py-3 px-4 rounded-full bg-white hover:bg-stone-50 active:scale-[0.99] text-stone-800 border border-stone-200/90 shadow-xs font-medium text-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
-          >
-            <span className="text-stone-700">👤</span>
-            <span>本地对战</span>
-          </button>
-
-          {/* 5. 残局闯关 */}
+          {/* 4. 残局闯关 */}
           <button
             id="btn-home-puzzles"
             onClick={onOpenPuzzles}
@@ -364,81 +351,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 className="flex-1 py-2 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition-colors shadow-xs"
               >
                 开始对战
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Local Game Config Modal */}
-      {showLocalModal && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-5 max-w-xs w-full shadow-xl border border-stone-200 flex flex-col gap-4 animate-scale-up">
-            <h3 className="font-bold text-base text-stone-900 text-center flex items-center justify-center gap-1.5">
-              <span>👤</span> 本地对战设置
-            </h3>
-
-            <div>
-              <label className="text-xs font-semibold text-stone-600 mb-1.5 block">
-                选择玩家人数
-              </label>
-              <div className="grid grid-cols-3 gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setSelectedPlayerCount(2)}
-                  className={`py-2 px-1 text-xs rounded-xl font-medium border transition-all ${
-                    selectedPlayerCount === 2
-                      ? 'bg-blue-50 border-blue-400 text-blue-800 font-bold'
-                      : 'bg-stone-50 border-stone-200 text-stone-600'
-                  }`}
-                >
-                  <div>2人对战</div>
-                  <div className="text-[10px] text-stone-400 font-normal">各10面墙</div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedPlayerCount(3)}
-                  className={`py-2 px-1 text-xs rounded-xl font-medium border transition-all ${
-                    selectedPlayerCount === 3
-                      ? 'bg-blue-50 border-blue-400 text-blue-800 font-bold'
-                      : 'bg-stone-50 border-stone-200 text-stone-600'
-                  }`}
-                >
-                  <div>3人对战</div>
-                  <div className="text-[10px] text-amber-600 font-semibold">各7面墙</div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedPlayerCount(4)}
-                  className={`py-2 px-1 text-xs rounded-xl font-medium border transition-all ${
-                    selectedPlayerCount === 4
-                      ? 'bg-blue-50 border-blue-400 text-blue-800 font-bold'
-                      : 'bg-stone-50 border-stone-200 text-stone-600'
-                  }`}
-                >
-                  <div>4人对战</div>
-                  <div className="text-[10px] text-stone-400 font-normal">各5面墙</div>
-                </button>
-              </div>
-            </div>
-
-            <div className="flex gap-2 mt-2">
-              <button
-                type="button"
-                onClick={() => setShowLocalModal(false)}
-                className="flex-1 py-2 rounded-xl bg-stone-100 text-stone-700 text-xs font-medium hover:bg-stone-200 transition-colors"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowLocalModal(false);
-                  onStartLocalGame(selectedPlayerCount);
-                }}
-                className="flex-1 py-2 rounded-xl bg-stone-900 text-white text-xs font-semibold hover:bg-stone-800 transition-colors shadow-xs"
-              >
-                进入棋局
               </button>
             </div>
           </div>

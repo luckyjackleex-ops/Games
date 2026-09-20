@@ -181,19 +181,6 @@ export default function App() {
     setCurrentScreen('game');
   };
 
-  const handleStartLocalGame = (count: 2 | 3 | 4) => {
-    setPlayerCount(count);
-    setGameMode('local');
-    setCurrentRoomId(null);
-    setMyPlayerIndex(0);
-    setState(createInitialState(count));
-    setActionMode('move');
-    setSelectedWallSlot(null);
-    setLastAction(null);
-    setBoardRotation(0);
-    setCurrentScreen('game');
-  };
-
   const handleCreateRoom = async (count: 2 | 3 | 4) => {
     try {
       const room = await createOnlineRoom(count, '小猫 (房主)', '🐱');
@@ -440,7 +427,6 @@ export default function App() {
         <HomeScreen
           onStartAiGame={handleStartAiGame}
           onStartPassAndPlay={handleStartPassAndPlay}
-          onStartLocalGame={handleStartLocalGame}
           onCreateRoom={handleCreateRoom}
           onJoinRoom={handleJoinRoom}
           onOpenRules={() => setIsRulesOpen(true)}
@@ -562,10 +548,8 @@ export default function App() {
                         {aiDifficulty === 'easy' ? '🌱 简单' : aiDifficulty === 'medium' ? '⚡ 中等' : '👑 大师'}
                       </span>
                     </>
-                  ) : gameMode === 'pass_and_play' ? (
-                    '面对面对战'
                   ) : (
-                    '本地对战'
+                    '面对面对战'
                   )}
                 </span>
               )}
