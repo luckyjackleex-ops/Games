@@ -128,24 +128,28 @@ class RealtimeSyncManager {
     onUpdate?: (room: OnlineRoom) => void,
     onDisband?: () => void
   ): Promise<boolean> {
+    const clonedRoom: OnlineRoom = JSON.parse(JSON.stringify(room));
     this.isHost = true;
     this.currentRoomId = room.id.toLowerCase();
     this.myPlayerId = room.hostId;
-    this.activeRoomState = room;
+    this.activeRoomState = clonedRoom;
 
     if (onUpdate) this.updateListeners.add(onUpdate);
     if (onDisband) this.disbandListeners.add(onDisband);
 
     this.setupBroadcastChannel(room.id);
-    this.saveLocalRoom(room);
+    this.saveLocalRoom(clonedRoom);
 
     try {
       const client = await this.connectBroker();
       const stateTopic = this.getStateTopic(room.id);
       const eventsTopic = this.getEventsTopic(room.id);
 
+      // Clean old listeners to prevent duplicates
+      client.removeAllListeners('message');
+
       client.subscribe([stateTopic, eventsTopic], { qos: 1 }, () => {
-        client.publish(stateTopic, JSON.stringify(room), { retain: true, qos: 1 });
+        client.publish(stateTopic, JSON.stringify(clonedRoom), { retain: true, qos: 1 });
       });
 
       client.on('message', (topic: string, message: Buffer) => {
@@ -193,42 +197,71 @@ class RealtimeSyncManager {
 
     return new Promise(async (resolve) => {
       let resolved = false;
+      let joinInterval: NodeJS.Timeout | null = null;
 
-      const timer = setTimeout(() => {
+      const finishResolve = (result: { room: OnlineRoom | null; playerIndex: number; error?: string }) => {
         if (!resolved) {
           resolved = true;
-          const localRoom = this.getLocalRoom(normId);
-          if (localRoom) {
-            resolve({
-              room: localRoom,
-              playerIndex: localRoom.players.findIndex((p) => p.id === playerId),
-            });
-          } else {
-            resolve({
-              room: null,
-              playerIndex: -1,
-              error: '未找到该房间，请确认房间号是否正确或房主是否在线',
-            });
+          if (joinInterval) {
+            clearInterval(joinInterval);
+            joinInterval = null;
           }
+          resolve(result);
         }
-      }, 3500);
+      };
+
+      const timer = setTimeout(() => {
+        const localRoom = this.getLocalRoom(normId);
+        if (localRoom) {
+          finishResolve({
+            room: localRoom,
+            playerIndex: localRoom.players.findIndex((p) => p.id === playerId),
+          });
+        } else {
+          finishResolve({
+            room: null,
+            playerIndex: -1,
+            error: '未找到该房间，请确认房间号是否正确或房主是否在线',
+          });
+        }
+      }, 4000);
 
       try {
         const client = await this.connectBroker();
 
+        client.removeAllListeners('message');
         client.subscribe([stateTopic, eventsTopic], { qos: 1 });
 
-        // Send JOIN event
-        client.publish(
-          eventsTopic,
-          JSON.stringify({
-            type: 'P2P_JOIN',
-            playerId,
-            playerName,
-            playerAvatar,
-          }),
-          { qos: 1 }
-        );
+        const sendJoin = () => {
+          if (client && client.connected) {
+            client.publish(
+              eventsTopic,
+              JSON.stringify({
+                type: 'P2P_JOIN',
+                playerId,
+                playerName,
+                playerAvatar,
+              }),
+              { qos: 1 }
+            );
+          }
+        };
+
+        // Send JOIN immediately
+        sendJoin();
+
+        // Re-send JOIN every 800ms until confirmed in players list
+        joinInterval = setInterval(() => {
+          const current = this.activeRoomState || this.getLocalRoom(normId);
+          if (current && current.players.some((p) => p.id === playerId)) {
+            if (joinInterval) {
+              clearInterval(joinInterval);
+              joinInterval = null;
+            }
+          } else {
+            sendJoin();
+          }
+        }, 800);
 
         client.on('message', (topic: string, message: Buffer) => {
           try {
@@ -237,40 +270,33 @@ class RealtimeSyncManager {
 
             if (topic === stateTopic) {
               const room = JSON.parse(raw) as OnlineRoom;
-              this.activeRoomState = room;
-              this.saveLocalRoom(room);
+              const clonedRoom: OnlineRoom = JSON.parse(JSON.stringify(room));
+              this.activeRoomState = clonedRoom;
+              this.saveLocalRoom(clonedRoom);
 
-              let pIndex = room.players.findIndex((p) => p.id === playerId);
-              if (pIndex < 0 && room.players.length < room.playerCount) {
-                client.publish(
-                  eventsTopic,
-                  JSON.stringify({
-                    type: 'P2P_JOIN',
-                    playerId,
-                    playerName,
-                    playerAvatar,
-                  }),
-                  { qos: 1 }
-                );
+              let pIndex = clonedRoom.players.findIndex((p) => p.id === playerId);
+              if (pIndex >= 0) {
+                if (joinInterval) {
+                  clearInterval(joinInterval);
+                  joinInterval = null;
+                }
               }
 
-              if (!resolved) {
-                resolved = true;
-                clearTimeout(timer);
-                resolve({
-                  room,
-                  playerIndex: pIndex >= 0 ? pIndex : room.players.length,
-                });
-              }
+              clearTimeout(timer);
+              finishResolve({
+                room: clonedRoom,
+                playerIndex: pIndex >= 0 ? pIndex : clonedRoom.players.length,
+              });
 
-              this.notifyUpdate(room);
+              this.notifyUpdate(clonedRoom);
             } else if (topic === eventsTopic) {
               const event = JSON.parse(raw) as RealtimeMessage;
               if (event.type === 'P2P_DISBANDED') {
                 this.notifyDisband();
               } else if (event.type === 'P2P_START' && event.room) {
-                this.activeRoomState = event.room;
-                this.notifyUpdate(event.room);
+                const startRoom: OnlineRoom = JSON.parse(JSON.stringify(event.room));
+                this.activeRoomState = startRoom;
+                this.notifyUpdate(startRoom);
               }
             }
           } catch (e) {
@@ -278,19 +304,17 @@ class RealtimeSyncManager {
           }
         });
       } catch {
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timer);
-          resolve({ room: null, playerIndex: -1, error: '网络连接异常，请重试' });
-        }
+        clearTimeout(timer);
+        finishResolve({ room: null, playerIndex: -1, error: '网络连接异常，请重试' });
       }
     });
   }
 
   private notifyUpdate(room: OnlineRoom) {
+    const cloned: OnlineRoom = JSON.parse(JSON.stringify(room));
     this.updateListeners.forEach((fn) => {
       try {
-        fn(room);
+        fn(cloned);
       } catch {}
     });
   }
@@ -306,8 +330,11 @@ class RealtimeSyncManager {
   // Host handles guest events (JOIN, ACTION, START, LEAVE)
   private handleHostIncomingEvent(event: RealtimeMessage) {
     if (!this.isHost || !this.currentRoomId) return;
-    const room = this.activeRoomState || this.getLocalRoom(this.currentRoomId);
-    if (!room) return;
+    const baseRoom = this.activeRoomState || this.getLocalRoom(this.currentRoomId);
+    if (!baseRoom) return;
+
+    // Deep clone room so reference changes and React triggers re-render
+    const room: OnlineRoom = JSON.parse(JSON.stringify(baseRoom));
 
     if (event.type === 'P2P_JOIN') {
       let playerIndex = room.players.findIndex((p) => p.id === event.playerId);
@@ -325,9 +352,18 @@ class RealtimeSyncManager {
           isHost: false,
           connected: true,
         };
-        room.players.push(newPlayer);
+        room.players = [...room.players, newPlayer];
       } else {
-        room.players[playerIndex].connected = true;
+        room.players = room.players.map((p, idx) =>
+          idx === playerIndex
+            ? {
+                ...p,
+                connected: true,
+                name: event.playerName || p.name,
+                avatar: event.playerAvatar || p.avatar,
+              }
+            : p
+        );
       }
 
       this.activeRoomState = room;
@@ -347,7 +383,7 @@ class RealtimeSyncManager {
     } else if (event.type === 'P2P_LEAVE') {
       const idx = room.players.findIndex((p) => p.id === event.playerId);
       if (idx >= 0) {
-        room.players[idx].connected = false;
+        room.players = room.players.map((p, i) => (i === idx ? { ...p, connected: false } : p));
         this.activeRoomState = room;
         this.broadcastRoom(room);
       }
@@ -361,17 +397,18 @@ class RealtimeSyncManager {
 
   // Broadcast Room to all players via MQTT (retain: true) + BroadcastChannel + Local callback
   public broadcastRoom(room: OnlineRoom) {
-    this.activeRoomState = room;
-    this.saveLocalRoom(room);
+    const cloned: OnlineRoom = JSON.parse(JSON.stringify(room));
+    this.activeRoomState = cloned;
+    this.saveLocalRoom(cloned);
 
-    // 1. Local listeners
-    this.notifyUpdate(room);
+    // 1. Local listeners with new cloned object reference
+    this.notifyUpdate(cloned);
 
     // 2. BroadcastChannel for same-browser tabs
     try {
       this.broadcastChannel?.postMessage({
         type: 'P2P_UPDATE',
-        room,
+        room: cloned,
       });
     } catch {}
 
@@ -379,18 +416,18 @@ class RealtimeSyncManager {
     if (this.client && this.client.connected && this.currentRoomId) {
       const stateTopic = this.getStateTopic(this.currentRoomId);
       const eventsTopic = this.getEventsTopic(this.currentRoomId);
-      const json = JSON.stringify(room);
+      const json = JSON.stringify(cloned);
 
       this.client.publish(stateTopic, json, { retain: true, qos: 1 });
 
-      if (room.status === 'playing') {
+      if (cloned.status === 'playing') {
         this.client.publish(
           eventsTopic,
           JSON.stringify({
             type: 'P2P_START',
             fillWithAi: false,
             playerId: this.myPlayerId,
-            room,
+            room: cloned,
           }),
           { qos: 1 }
         );

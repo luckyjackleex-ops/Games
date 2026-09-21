@@ -128,6 +128,8 @@ export async function createOnlineRoom(
   } catch {}
 
   addRecentRoom(fallbackRoom.id, hostName, playerCount);
+  // Immediately initialize Host on broker so it's ready to receive guest joins
+  realtimeManager.initHost(fallbackRoom);
   return fallbackRoom;
 }
 
@@ -403,7 +405,6 @@ export function subscribeToRoom(
       pollingTimer = null;
     }
     unsubRealtime();
-    realtimeManager.cleanup();
   };
 }
 

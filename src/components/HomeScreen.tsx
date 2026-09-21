@@ -109,7 +109,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         {/* Announcement Box */}
         <div className="w-full bg-white border border-stone-200/90 rounded-xl px-3.5 py-2.5 shadow-2xs text-center">
           <p className="text-xs text-stone-600 leading-relaxed">
-            公告：支持人机对战、面对面对战、创建房间联机、残局闯关、复盘与视角切换。
+            📢 公告：在线联机已全面升级国内低延迟高速专线，支持2-4人跨设备联机对战、人机对战、残局闯关与自由复盘。
           </p>
         </div>
 

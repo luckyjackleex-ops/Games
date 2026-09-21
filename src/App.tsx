@@ -106,7 +106,7 @@ export default function App() {
     // Load initial room data
     getOnlineRoom(currentRoomId).then((initial) => {
       if (initial) {
-        setCurrentRoom(initial);
+        setCurrentRoom({ ...initial, players: [...initial.players] });
         setState(initial.state);
       }
     });
@@ -126,7 +126,7 @@ export default function App() {
           } else if (prev && prev.players.length < updatedRoom.players.length) {
             soundManager.playJoinRoom();
           }
-          return updatedRoom;
+          return { ...updatedRoom, players: [...updatedRoom.players] };
         });
         setState(updatedRoom.state);
       },
