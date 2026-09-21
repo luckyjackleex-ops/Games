@@ -1,6 +1,6 @@
 import { GameState, Action } from '../types';
 import { createInitialState } from './rules';
-import { p2pManager } from './p2p';
+import { realtimeManager } from './realtime';
 
 export interface RoomPlayer {
   id: string;
@@ -147,11 +147,11 @@ export async function getOnlineRoom(roomId: string): Promise<OnlineRoom | null> 
     // Server not available or 404
   }
 
-  // Fallback to P2P local storage
-  return p2pManager.getLocalRoom(normId);
+  // Fallback to real-time local storage
+  return realtimeManager.getLocalRoom(normId);
 }
 
-// 3. Join an existing room (Server-first with WebRTC P2P fallback)
+// 3. Join an existing room (Server-first with China-optimized MQTT Real-time fallback)
 export async function joinOnlineRoom(
   roomId: string,
   playerName?: string,
@@ -173,7 +173,7 @@ export async function joinOnlineRoom(
           playerAvatar,
         }),
       },
-      2500
+      2000
     );
 
     if (res.ok) {
@@ -193,7 +193,7 @@ export async function joinOnlineRoom(
   }
 
   // Check if current user is the host re-entering their own room
-  const localRoom = p2pManager.getLocalRoom(normId);
+  const localRoom = realtimeManager.getLocalRoom(normId);
   if (localRoom) {
     const pIdx = localRoom.players.findIndex((p) => p.id === playerId);
     if (pIdx >= 0) {
@@ -202,8 +202,8 @@ export async function joinOnlineRoom(
     }
   }
 
-  // Fallback to WebRTC P2P connection to the host
-  const result = await p2pManager.initGuest(
+  // Fallback to high-speed MQTT Real-time broker
+  const result = await realtimeManager.initGuest(
     normId,
     playerId,
     playerName || '小狗',
@@ -239,9 +239,9 @@ export async function startOnlineRoom(roomId: string, fillWithAi = false): Promi
     // Server unavailable
   }
 
-  // P2P / Netlify fallback
-  p2pManager.startGame(fillWithAi);
-  return p2pManager.getLocalRoom(normId);
+  // Real-time / Netlify fallback
+  realtimeManager.startGame(fillWithAi);
+  return realtimeManager.getLocalRoom(normId);
 }
 
 // 5. Player leaves room
@@ -263,8 +263,8 @@ export async function leaveOnlineRoom(roomId: string): Promise<{ disbanded: bool
     // Server unavailable
   }
 
-  // P2P / Netlify fallback
-  p2pManager.leaveRoom(playerId);
+  // Real-time / Netlify fallback
+  realtimeManager.leaveRoom(playerId);
   return { disbanded: true };
 }
 
@@ -288,9 +288,9 @@ export async function applyOnlineRoomAction(roomId: string, action: Action): Pro
     // Server unavailable
   }
 
-  // P2P / Netlify fallback
-  p2pManager.sendAction(action, playerId);
-  return p2pManager.getLocalRoom(normId);
+  // Real-time / Netlify fallback
+  realtimeManager.sendAction(action, playerId);
+  return realtimeManager.getLocalRoom(normId);
 }
 
 // 7. Reset room game
@@ -313,12 +313,12 @@ export async function resetOnlineRoom(roomId: string): Promise<OnlineRoom | null
     // Server unavailable
   }
 
-  // P2P / Netlify fallback
-  p2pManager.resetGame(playerId);
-  return p2pManager.getLocalRoom(normId);
+  // Real-time / Netlify fallback
+  realtimeManager.resetGame(playerId);
+  return realtimeManager.getLocalRoom(normId);
 }
 
-// 8. Subscribe to room updates (Hybrid: Server SSE + P2P WebRTC + BroadcastChannel)
+// 8. Subscribe to room updates (Hybrid: Server SSE + China MQTT Real-time + BroadcastChannel)
 export function subscribeToRoom(
   roomId: string,
   onUpdate: (room: OnlineRoom) => void,
@@ -330,11 +330,25 @@ export function subscribeToRoom(
   let pollingTimer: number | null = null;
   let isClosed = false;
 
-  // Initialize P2P Host if current user is the host
-  const localRoom = p2pManager.getLocalRoom(normId);
+  // Initialize Host on broker if current user is the host
+  const localRoom = realtimeManager.getLocalRoom(normId);
   if (localRoom && localRoom.hostId === playerId) {
-    p2pManager.initHost(localRoom, onUpdate, onDisbanded);
+    realtimeManager.initHost(localRoom, onUpdate, onDisbanded);
   }
+
+  // Hook real-time updates from MQTT & BroadcastChannel
+  const unsubRealtime = realtimeManager.subscribeRoomUpdates(
+    (room) => {
+      if (!isClosed) {
+        onUpdate(room);
+      }
+    },
+    () => {
+      if (!isClosed) {
+        onDisbanded?.();
+      }
+    }
+  );
 
   // Polling function for Server mode (SAFE: never disbands on null or 404)
   const pollServer = async () => {
@@ -344,8 +358,6 @@ export function subscribeToRoom(
       if (room && !isClosed) {
         onUpdate(room);
       }
-      // CRITICAL FIX: Never call onDisbanded here on null!
-      // A static Netlify host or transient network drop should NEVER kick player out to home!
     } catch {
       // ignore transient poll error
     }
@@ -369,7 +381,7 @@ export function subscribeToRoom(
         }
       };
       eventSource.onerror = () => {
-        // SSE temporary reconnecting or static deployment; P2P and polling cover updates
+        // SSE temporary reconnecting or static deployment
       };
     } catch {
       // ignore
@@ -390,7 +402,8 @@ export function subscribeToRoom(
       clearInterval(pollingTimer);
       pollingTimer = null;
     }
-    p2pManager.cleanup();
+    unsubRealtime();
+    realtimeManager.cleanup();
   };
 }
 

@@ -114,6 +114,12 @@ export default function App() {
     const unsubscribe = subscribeToRoom(
       currentRoomId,
       (updatedRoom) => {
+        const myId = getMyPlayerId();
+        const foundIdx = updatedRoom.players.findIndex((p) => p.id === myId);
+        if (foundIdx >= 0) {
+          setMyPlayerIndex(foundIdx);
+        }
+
         setCurrentRoom((prev) => {
           if (prev && prev.status === 'waiting' && updatedRoom.status === 'playing') {
             soundManager.playGameStart();

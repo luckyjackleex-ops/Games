@@ -99,9 +99,15 @@ export const WaitingLobby: React.FC<WaitingLobbyProps> = ({
       <div className="w-full max-w-sm sm:max-w-md mx-auto flex-1 flex flex-col items-center justify-center gap-4 py-2">
         {/* Lobby Header Badge */}
         <div className="flex flex-col items-center gap-1.5 text-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-800 text-xs font-semibold">
-            <Users className="w-3.5 h-3.5" />
-            <span>联机对战等候室 · {targetCount}人场</span>
+          <div className="flex items-center gap-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-800 text-xs font-semibold">
+              <Users className="w-3.5 h-3.5" />
+              <span>联机对战等候室 · {targetCount}人场</span>
+            </div>
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>极速通道已联通</span>
+            </div>
           </div>
           <h2 className="text-xl font-bold text-stone-900 tracking-tight">
             {isFull ? '全员已就绪，等待开启' : '等候好友进入房间'}
